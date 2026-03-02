@@ -32,6 +32,8 @@ type dhtNode struct {
 
 	inFlyQueries int32
 
+	rawNode *Node // full node descriptor, used by Server to respond to findNode queries
+
 	mx sync.Mutex
 }
 

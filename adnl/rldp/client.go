@@ -1151,7 +1151,7 @@ func (r *RLDP) DoQuery(ctx context.Context, maxAnswerSize uint64, query, result 
 		reflect.ValueOf(result).Elem().Set(reflect.ValueOf(resp.Result))
 		return nil
 	case <-ctx.Done():
-		return fmt.Errorf("response deadline exceeded, err: %w", ctx.Err())
+		return fmt.Errorf("response deadline exceeded for %s, err: %w", r.adnl.RemoteAddr(), ctx.Err())
 	}
 }
 

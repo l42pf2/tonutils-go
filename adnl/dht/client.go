@@ -140,6 +140,16 @@ func NewClient(gateway Gateway, nodes []*Node) (*Client, error) {
 
 const _K = 7
 
+func (c *Client) GetNodes() map[string]ed25519.PublicKey {
+	result := make(map[string]ed25519.PublicKey)
+	for _, bucket := range c.buckets {
+		for _, node := range bucket.getNodes() {
+			result[node.addr] = node.serverKey
+		}
+	}
+	return result
+}
+
 func (c *Client) Close() {
 	c.globalCtxCancel()
 	_ = c.gateway.Close()
@@ -177,6 +187,7 @@ func (c *Client) addNode(node *Node) (_ *dhtNode, err error) {
 	}
 
 	kNode := c.initNode(kid, addr, pub.Key)
+	kNode.rawNode = node
 	bucket.addNode(kNode)
 
 	return kNode, nil
@@ -544,6 +555,32 @@ func (c *Client) FindValue(ctx context.Context, key *Key, continuation ...*Conti
 		cont.checkedNodes = append(cont.checkedNodes, val.node)
 		return val.value, cont, nil
 	}
+}
+
+// GetNearestNodes returns up to k full Node descriptors closest (by XOR distance) to id.
+// Only nodes that have a stored raw descriptor are included.
+func (c *Client) GetNearestNodes(id []byte, k int) []*Node {
+	plist := newPriorityList(k, id)
+
+	for i := 255; i >= 0; i-- {
+		for _, node := range c.buckets[i].getNodes() {
+			if node != nil {
+				plist.Add(node)
+			}
+		}
+	}
+
+	var result []*Node
+	for {
+		n, _ := plist.Get()
+		if n == nil {
+			break
+		}
+		if n.rawNode != nil {
+			result = append(result, n.rawNode)
+		}
+	}
+	return result
 }
 
 func (c *Client) buildPriorityList(id []byte) *priorityList {
