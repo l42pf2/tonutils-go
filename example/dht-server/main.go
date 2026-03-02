@@ -23,11 +23,12 @@ import (
 )
 
 var (
-	flagAddr    = flag.String("addr", "0.0.0.0:3278", "UDP listen address (host:port)")
-	flagExtIP   = flag.String("ext-ip", "", "external IP to advertise in DHT (required when listening on 0.0.0.0)")
-	flagKeyFile = flag.String("key", "dht-server.key", "path to ed25519 key file (auto-generated if not found)")
-	flagConfig  = flag.String("config", "https://ton-blockchain.github.io/global.config.json", "TON global config URL or file path")
-	flagVerbose = flag.Bool("v", false, "enable debug-level logging")
+	flagAddr      = flag.String("addr", "0.0.0.0:3278", "UDP listen address (host:port)")
+	flagExtIP     = flag.String("ext-ip", "", "external IP to advertise in DHT (required when listening on 0.0.0.0)")
+	flagKeyFile   = flag.String("key", "dht-server.key", "path to ed25519 key file (auto-generated if not found)")
+	flagStateFile = flag.String("state", "dht-server.state", "path to routing-table snapshot file (saved on exit, loaded on start)")
+	flagConfig    = flag.String("config", "https://ton-blockchain.github.io/global.config.json", "TON global config URL or file path")
+	flagVerbose   = flag.Bool("v", false, "enable debug-level logging")
 )
 
 // keyStore is the on-disk format for the server's persistent ed25519 key.
@@ -117,9 +118,14 @@ func main() {
 	log.Info().Int("bootstrap_nodes", len(cfg.DHT.StaticNodes.Nodes)).Msg("DHT client initialized")
 
 	// ── DHT server ────────────────────────────────────────────────────────────
-	dhtServer, err := dht.NewServer(gateway, dhtClient, privKey)
+	dhtServer, err := dht.NewServer(gateway, dhtClient, privKey, -1)
 	if err != nil {
 		log.Fatal().Err(err).Msg("failed to create DHT server")
+	}
+	if *flagStateFile != "" {
+		if err = dhtServer.SetStateFile(*flagStateFile); err != nil {
+			log.Warn().Err(err).Str("path", *flagStateFile).Msg("failed to load DHT state file")
+		}
 	}
 	log.Info().Msg("DHT server started — accepting queries")
 
