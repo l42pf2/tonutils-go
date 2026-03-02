@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"os"
 	"sync"
 	"time"
 
@@ -79,6 +80,8 @@ type Server struct {
 	// NAT-traversal client (registered via RegisterAsReverseConnection).
 	ourReverseConns   map[string]struct{}
 	ourReverseConnsMx sync.RWMutex
+
+	stateFile string // path to routing-table snapshot file; empty = disabled
 
 	globalCtx       context.Context
 	globalCtxCancel func()
@@ -781,7 +784,71 @@ func reverseConnectionKeyID(clientID []byte) ([]byte, error) {
 	})
 }
 
-// Close stops the server's background goroutines.
+// SetStateFile sets the path for the routing-table snapshot file.
+// If the file already exists its nodes are loaded into the routing table immediately.
+// On Close the current routing table is saved to that file.
+func (s *Server) SetStateFile(path string) error {
+	s.stateFile = path
+	return s.loadState()
+}
+
+// loadState reads the routing-table snapshot from s.stateFile and adds all
+// recorded nodes to the client's routing table. A missing file is not an error.
+func (s *Server) loadState() error {
+	data, err := os.ReadFile(s.stateFile)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("failed to read DHT state file: %w", err)
+	}
+
+	var list NodesList
+	if _, err = tl.Parse(&list, data, true); err != nil {
+		return fmt.Errorf("failed to parse DHT state file: %w", err)
+	}
+
+	loaded := 0
+	for _, node := range list.List {
+		if _, err := s.client.addNode(node); err == nil {
+			loaded++
+		}
+	}
+	Logger("DHT server: loaded", loaded, "nodes from state file", s.stateFile)
+	return nil
+}
+
+// saveState writes all known routing-table nodes to s.stateFile.
+func (s *Server) saveState() error {
+	if s.stateFile == "" {
+		return nil
+	}
+
+	var nodes []*Node
+	for _, bucket := range s.client.buckets {
+		for _, n := range bucket.getNodes() {
+			if n != nil && n.rawNode != nil {
+				nodes = append(nodes, n.rawNode)
+			}
+		}
+	}
+
+	data, err := tl.Serialize(NodesList{List: nodes}, true)
+	if err != nil {
+		return fmt.Errorf("failed to serialize DHT state: %w", err)
+	}
+
+	if err := os.WriteFile(s.stateFile, data, 0o600); err != nil {
+		return fmt.Errorf("failed to write DHT state file: %w", err)
+	}
+	Logger("DHT server: saved", len(nodes), "nodes to state file", s.stateFile)
+	return nil
+}
+
+// Close stops the server's background goroutines and saves the routing table.
 func (s *Server) Close() {
+	if err := s.saveState(); err != nil {
+		Logger("DHT server: failed to save state:", err)
+	}
 	s.globalCtxCancel()
 }
